@@ -3,7 +3,7 @@
 // the kill streak — and it fires the sounds and effects for everything that
 // happens in it. The renderer only draws what is here.
 
-import { FIELD, WAVE_INTRO, BOSS_EVERY, STREAK_WINDOW } from './config.js';
+import { FIELD, WAVE_INTRO, BOSS_EVERY, RING_BOSS_EVERY, STREAK_WINDOW, spawnInterval } from './config.js';
 import { createRandom, distance } from './rng.js';
 import { createEffects } from './effects.js';
 import { createPlayer, damagePlayer, healPlayer, pickupRadius, stepPlayer } from './player.js';
@@ -50,6 +50,8 @@ export function createWorld(seed, audio) {
     spawnTimer: 0,
     upgradeChoices: [],
     boss: null,
+    bossName: null,
+    hitstop: 0,
     player: createPlayer(),
     enemies: [],
     bullets: [],
@@ -112,11 +114,20 @@ export function startWave(world, n) {
   world.queue = buildWaveQueue(world, n);
   world.spawnTimer = 0;
   world.boss = null;
-  if (n % BOSS_EVERY === 0) {
+  world.bossName = null;
+  if (n % RING_BOSS_EVERY === 0) {
+    // Every tenth wave the Halo Warden takes the Voidwarden's place.
+    world.queue = world.queue.slice(0, 6);
+    const p = edgeSpawnPoint(world);
+    world.boss = spawnEnemy(world, 'ringboss', p.x, p.y);
+    world.bossName = 'THE HALO WARDEN';
+    world.audio.roar();
+  } else if (n % BOSS_EVERY === 0) {
     // Boss waves stay fair: the boss plus a short escort queue.
     world.queue = world.queue.slice(0, 6);
     const p = edgeSpawnPoint(world);
     world.boss = spawnEnemy(world, 'boss', p.x, p.y);
+    world.bossName = 'THE VOIDWARDEN';
     world.audio.boss();
   } else {
     world.audio.wave();
@@ -168,14 +179,25 @@ export function onPlayerShot(world) {
 }
 
 /** Hurt an enemy; kills it (and splits it, if it is a splitter) at 0 HP. */
-export function hurtEnemy(world, e, damage, silent) {
+export function hurtEnemy(world, e, damage, silent, crit) {
   if (!e.active) return;
   e.hp -= damage;
   e.hitFlash = 1;
   world.damageDealt += damage;
   if (!silent) world.shotsHit += 1;
-  world.effects.floater(e.x, e.y - e.radius - 6, String(Math.round(damage)), '#ffe14d', 14);
+  world.effects.floater(
+    e.x,
+    e.y - e.radius - 6,
+    crit ? `CRIT ${Math.round(damage)}` : String(Math.round(damage)),
+    crit ? '#ffd94d' : '#ffe14d',
+    crit ? 18 : 14,
+  );
   if (e.hp <= 0) killEnemy(world, e);
+}
+
+/** The score multiplier from the kill streak: +5% per kill in the streak, capped at x2. */
+export function comboMultiplier(world) {
+  return 1 + 0.05 * Math.min(world.streak, 20);
 }
 
 /** Kill an enemy: score, streak, drops, particles, and the splitter's mites. */
@@ -187,26 +209,41 @@ export function killEnemy(world, e) {
   world.waveKills += 1;
   const mult = 1 + (world.wave - 1) * 0.1;
   const streakBonus = world.streak >= 5 ? Math.min(50, world.streak * 2) : 0;
-  const gained = Math.round(e.score * mult) + streakBonus;
+  const gained = Math.round(e.score * mult * comboMultiplier(world)) + streakBonus;
   world.score += gained;
   world.streak += 1;
-  world.streakTimer = STREAK_WINDOW;
+  world.streakTimer = STREAK_WINDOW + upgradeLevel(player, 'combo') * 1.0;
   world.bestStreak = Math.max(world.bestStreak, world.streak);
-  world.effects.explosion(e.x, e.y, e.color, e.kind === 'boss' ? 2.4 : e.kind === 'brute' ? 1.6 : 1);
+  // Hit-stop: the world freezes for a beat on a kill, longer on a big one.
+  world.hitstop = Math.max(world.hitstop, e.kind === 'boss' || e.kind === 'ringboss' ? 0.12 : e.kind === 'brute' ? 0.06 : 0.035);
+  world.effects.explosion(e.x, e.y, e.color, e.kind === 'boss' || e.kind === 'ringboss' ? 2.4 : e.kind === 'brute' ? 1.6 : 1);
   world.effects.floater(e.x, e.y - e.radius - 22, `+${gained}`, '#8ef6ff', 16);
-  if (world.streak === 5 || world.streak === 10 || world.streak === 15) {
-    world.effects.floater(player.x, player.y - 30, world.streak >= 15 ? 'UNSTOPPABLE!' : world.streak >= 10 ? 'RAMPAGE x10!' : 'RAMPAGE x5!', '#ff9f2e', 22);
+  if (world.streak === 5 || world.streak === 10 || world.streak === 15 || world.streak === 20 || world.streak === 25) {
+    world.effects.floater(player.x, player.y - 30, world.streak >= 25 ? 'UNSTOPPABLE x25!' : world.streak >= 20 ? 'RAMPAGE x20!' : world.streak >= 15 ? 'UNSTOPPABLE!' : world.streak >= 10 ? 'RAMPAGE x10!' : 'RAMPAGE x5!', '#ff9f2e', 22);
   }
+  if (world.streak >= 3) world.audio.combo(world.streak);
   world.audio.explode();
-  dropPickup(world, e.x, e.y, 'credit', e.kind === 'boss' ? 10 : e.kind === 'brute' ? 3 : 1);
+  // Vampiric Hull: kills put a little hull back.
+  const vampire = upgradeLevel(player, 'vampire');
+  if (vampire > 0) healPlayer(player, 0.5 * vampire);
+  dropPickup(world, e.x, e.y, 'credit', e.kind === 'boss' || e.kind === 'ringboss' ? 10 : e.kind === 'brute' ? 3 : 1);
   if (e.kind === 'splitter') {
     for (let i = 0; i < 3; i += 1) {
       const angle = (i / 3) * Math.PI * 2 + world.random();
       spawnEnemy(world, 'mite', e.x + Math.cos(angle) * 24, e.y + Math.sin(angle) * 24);
     }
   }
-  if (e.kind === 'boss') {
+  if (e.kind === 'kamikaze') {
+    // The blast goes off wherever it pops — and hurts the player if close.
+    world.effects.explosion(e.x, e.y, '#ff2e63', 1.2);
+    if (player.invuln <= 0 && distance(e.x, e.y, player.x, player.y) < 110) {
+      damagePlayer(world, player, e.damage);
+      world.audio.hurt();
+    }
+  }
+  if (e.kind === 'boss' || e.kind === 'ringboss') {
     world.boss = null;
+    world.bossName = null;
     world.effects.addShake(1);
     world.effects.addFlash(0.5);
     dropPickup(world, e.x, e.y, 'health', 40);
@@ -241,6 +278,14 @@ export function stepWorld(world, input, dt) {
   const player = world.player;
   let events = 0;
 
+  // Hit-stop: after a kill the world holds its breath for a few frames.
+  if (world.hitstop > 0) {
+    world.hitstop -= dt;
+    world.effects.step(dt);
+    world.audio.step(dt, player.hp / player.maxHp);
+    return 0;
+  }
+
   if (world.streakTimer > 0) {
     world.streakTimer -= dt;
     if (world.streakTimer <= 0) world.streak = 0;
@@ -253,7 +298,7 @@ export function stepWorld(world, input, dt) {
     if (world.queue.length > 0) {
       world.spawnTimer -= dt;
       if (world.spawnTimer <= 0) {
-        world.spawnTimer = 0.85;
+        world.spawnTimer = spawnInterval(world.wave);
         const kind = world.queue.shift();
         const p = edgeSpawnPoint(world);
         spawnEnemy(world, kind, p.x, p.y);
@@ -279,7 +324,7 @@ export function stepWorld(world, input, dt) {
   }
 
   world.effects.step(dt);
-  world.audio.step(dt);
+  world.audio.step(dt, player.hp / player.maxHp);
   return events;
 }
 
@@ -289,6 +334,33 @@ function stepBullets(world, dt) {
     const b = world.bullets[i];
     if (!b.active) continue;
     b.life -= dt;
+    // Seeker missiles bend toward the nearest enemy in range.
+    if (b.homing > 0 && b.from === 'player') {
+      let target = null;
+      let targetDist = 600;
+      for (let j = 0; j < world.enemies.length; j += 1) {
+        const e = world.enemies[j];
+        if (!e.active || b.hitSet.has(e)) continue;
+        const d = distance(b.x, b.y, e.x, e.y);
+        if (d < targetDist) {
+          targetDist = d;
+          target = e;
+        }
+      }
+      if (target) {
+        const speed = Math.hypot(b.vx, b.vy) || 1;
+        const want = Math.atan2(target.y - b.y, target.x - b.x);
+        const have = Math.atan2(b.vy, b.vx);
+        let turn = want - have;
+        while (turn > Math.PI) turn -= Math.PI * 2;
+        while (turn < -Math.PI) turn += Math.PI * 2;
+        const maxTurn = b.homing * dt;
+        const applied = Math.max(-maxTurn, Math.min(maxTurn, turn));
+        const next = have + applied;
+        b.vx = Math.cos(next) * speed;
+        b.vy = Math.sin(next) * speed;
+      }
+    }
     b.x += b.vx * dt;
     b.y += b.vy * dt;
     if (b.life <= 0 || b.x < -20 || b.x > FIELD.width + 20 || b.y < -20 || b.y > FIELD.height + 20) {
@@ -314,11 +386,33 @@ function stepBullets(world, dt) {
         const e = world.enemies[j];
         if (!e.active || b.hitSet.has(e)) continue;
         if (distance(b.x, b.y, e.x, e.y) < b.radius + e.radius) {
-          hurtEnemy(world, e, b.damage, false);
+          hurtEnemy(world, e, b.damage, false, b.crit);
           world.audio.hit();
           b.hitSet.add(e);
           if (b.pierce > 0) {
             b.pierce -= 1;
+          } else if (upgradeLevel(player, 'ricochet') > 0 && !b.bounced) {
+            // Ricochet: one bounce to the nearest other enemy in range.
+            let next = null;
+            let nextDist = 320;
+            for (let k = 0; k < world.enemies.length; k += 1) {
+              const other = world.enemies[k];
+              if (!other.active || other === e || b.hitSet.has(other)) continue;
+              const d = distance(b.x, b.y, other.x, other.y);
+              if (d < nextDist) {
+                nextDist = d;
+                next = other;
+              }
+            }
+            if (next) {
+              b.bounced = true;
+              const speed = Math.hypot(b.vx, b.vy) || 1;
+              const a = Math.atan2(next.y - b.y, next.x - b.x);
+              b.vx = Math.cos(a) * speed;
+              b.vy = Math.sin(a) * speed;
+            } else {
+              b.active = false;
+            }
           } else {
             b.active = false;
           }
@@ -385,6 +479,9 @@ function stepContacts(world) {
     if (distance(e.x, e.y, player.x, player.y) < e.radius + player.radius * 0.85) {
       if (damagePlayer(world, player, e.damage) > 0) {
         world.audio.hurt();
+        // Thorn Field: the attacker takes damage for touching the player.
+        const thorns = upgradeLevel(player, 'thorns');
+        if (thorns > 0) hurtEnemy(world, e, 12 * thorns, true);
         // Knock the enemy back a little so one touch is not a blender.
         const a = Math.atan2(e.y - player.y, e.x - player.x);
         e.x += Math.cos(a) * 26;

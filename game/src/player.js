@@ -28,7 +28,10 @@ export function createPlayer() {
     dashCooldown: 0,
     dashX: 0,
     dashY: 0,
+    dashCharges: 1,
+    dashRefill: 0,
     invuln: 0,
+    weapon: 'blaster',
     upgrades: {},
     kills: 0,
   };
@@ -42,6 +45,11 @@ export function playerSpeed(player) {
 /** Dash cooldown after the Dash Capacitor upgrades. */
 export function dashCooldownMax(player) {
   return PLAYER.dashCooldown * (1 - 0.3 * upgradeLevel(player, 'dash'));
+}
+
+/** How many dashes the player can store (one more per Dash Cell). */
+export function dashMaxCharges(player) {
+  return 1 + upgradeLevel(player, 'dashcharges');
 }
 
 /** Pickup radius after the Magnet Core upgrades. */
@@ -81,14 +89,18 @@ export function stepPlayer(world, player, input, dt) {
         player.vy = (player.vy / v) * f;
       }
     }
-    if (input.dashQueued && player.dashCooldown <= 0) {
+    if (input.dashQueued && player.dashCharges > 0) {
       const dx = move.x !== 0 || move.y !== 0 ? move.x : Math.cos(player.angle);
       const dy = move.x !== 0 || move.y !== 0 ? move.y : Math.sin(player.angle);
       const len = Math.hypot(dx, dy) || 1;
       player.dashX = dx / len;
       player.dashY = dy / len;
       player.dashTimer = PLAYER.dashTime;
+      player.dashCharges -= 1;
       player.dashCooldown = dashCooldownMax(player);
+      if (player.dashCharges < dashMaxCharges(player) && player.dashRefill <= 0) {
+        player.dashRefill = dashCooldownMax(player);
+      }
       player.invuln = Math.max(player.invuln, PLAYER.dashInvuln);
       dashed = 'dash';
       if (upgradeLevel(player, 'shockwave') > 0) {
@@ -102,6 +114,14 @@ export function stepPlayer(world, player, input, dt) {
   player.y = clamp(player.y + player.vy * dt, player.radius, FIELD.height - player.radius);
   collideObstacles(world, player);
 
+  // Spent dash charges refill one at a time on the dash cooldown.
+  if (player.dashCharges < dashMaxCharges(player)) {
+    player.dashRefill -= dt;
+    if (player.dashRefill <= 0) {
+      player.dashCharges += 1;
+      player.dashRefill = player.dashCharges < dashMaxCharges(player) ? dashCooldownMax(player) : 0;
+    }
+  }
   if (player.dashCooldown > 0) player.dashCooldown -= dt;
   if (player.invuln > 0) player.invuln -= dt;
 

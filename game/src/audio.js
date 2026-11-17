@@ -10,6 +10,7 @@ export function createAudio() {
   let musicTimer = 0;
   let musicOn = false;
   let beat = 0;
+  let heartTimer = 0;
   /** A minor pulse line: root, root, flat third, fifth, flat seventh, fifth. */
   const BASS_LINE = [55, 55, 65.41, 82.41, 98, 82.41];
 
@@ -102,6 +103,32 @@ export function createAudio() {
       tone(65, 0.7, 'sawtooth', 0.22, 49);
       tone(98, 0.7, 'sawtooth', 0.12, 73);
     },
+    /** The Halo Warden's arrival: a low roar that rises and breaks. */
+    roar() {
+      tone(48, 1.1, 'sawtooth', 0.26, 120);
+      tone(72, 1.1, 'sawtooth', 0.14, 180);
+      noise(0.9, 0.2, 400);
+    },
+    /** Combo chime: the pitch climbs with the streak, so a long run sounds higher. */
+    combo(streak) {
+      const step = Math.min(streak, 24);
+      const freq = 523 * Math.pow(2, step / 12);
+      tone(freq, 0.09, 'sine', 0.12);
+      tone(freq * 1.5, 0.12, 'sine', 0.08);
+    },
+    /** Railgun: a sharp electric crack. */
+    rail() {
+      tone(1400, 0.12, 'sawtooth', 0.16, 180);
+      noise(0.08, 0.12, 5200);
+    },
+    /** Seeker missile: a soft rising whoosh. */
+    missile() {
+      tone(300, 0.18, 'sine', 0.1, 900);
+    },
+    /** Low-hull heartbeat: a dull thump, called from the step pulse. */
+    heartbeat() {
+      tone(72, 0.12, 'sine', 0.2, 48);
+    },
     upgrade() {
       tone(523, 0.1, 'sine', 0.14);
       tone(659, 0.1, 'sine', 0.14);
@@ -125,8 +152,19 @@ export function createAudio() {
       musicOn = false;
     },
     /** Advance the pulse line; call once per fixed step while playing. */
-    step(dt) {
-      if (!musicOn || !context || context.state === 'suspended') return;
+    step(dt, hpFraction) {
+      if (!context || context.state === 'suspended') return;
+      // Low hull: a heartbeat under the music until the player heals.
+      if (hpFraction !== undefined && hpFraction > 0 && hpFraction < 0.3) {
+        heartTimer += dt;
+        if (heartTimer >= 0.85) {
+          heartTimer = 0;
+          tone(72, 0.12, 'sine', 0.2, 48);
+        }
+      } else {
+        heartTimer = 0;
+      }
+      if (!musicOn) return;
       musicTimer += dt;
       if (musicTimer >= 0.42) {
         musicTimer -= 0.42;

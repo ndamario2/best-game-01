@@ -5,6 +5,31 @@
 
 import { FIELD, PALETTE, FONT } from './config.js';
 
+/** The starfield: fixed stars from a fixed seed, so every run paints the same sky. */
+const STARS = (() => {
+  let state = 1337;
+  const next = () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let value = state;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+  const stars = [];
+  for (let i = 0; i < 130; i += 1) {
+    stars.push({ x: next() * FIELD.width, y: next() * FIELD.height, r: 0.6 + next() * 1.6, phase: next() * Math.PI * 2, speed: 0.6 + next() * 1.8 });
+  }
+  return stars;
+})();
+
+/** Nebula clouds: fixed positions, drifting slowly with the run's clock. */
+const NEBULAE = [
+  { x: 260, y: 170, r: 300, color: '123, 92, 255' },
+  { x: 1050, y: 540, r: 340, color: '255, 77, 141' },
+  { x: 980, y: 120, r: 260, color: '53, 242, 255' },
+  { x: 220, y: 590, r: 240, color: '255, 159, 46' },
+];
+
 /** Create the renderer for `canvas`; call `draw()` once a frame. */
 export function createRenderer(canvas) {
   const ctx = canvas.getContext('2d');
@@ -31,6 +56,28 @@ export function createRenderer(canvas) {
   function drawBackground(world) {
     ctx.fillStyle = PALETTE.backdrop;
     ctx.fillRect(0, 0, FIELD.width, FIELD.height);
+    // Nebula clouds, drifting a few pixels with the run's clock.
+    for (let i = 0; i < NEBULAE.length; i += 1) {
+      const n = NEBULAE[i];
+      const dx = Math.sin(world.time * 0.07 + i * 2.1) * 14;
+      const dy = Math.cos(world.time * 0.05 + i * 1.3) * 10;
+      const neb = ctx.createRadialGradient(n.x + dx, n.y + dy, 10, n.x + dx, n.y + dy, n.r);
+      neb.addColorStop(0, `rgba(${n.color}, 0.10)`);
+      neb.addColorStop(1, `rgba(${n.color}, 0)`);
+      ctx.fillStyle = neb;
+      ctx.fillRect(0, 0, FIELD.width, FIELD.height);
+    }
+    // Starfield: fixed stars that twinkle on their own phase.
+    for (let i = 0; i < STARS.length; i += 1) {
+      const s = STARS[i];
+      const twinkle = 0.45 + 0.55 * Math.abs(Math.sin(world.time * s.speed + s.phase));
+      ctx.globalAlpha = twinkle;
+      ctx.fillStyle = '#dfe9ff';
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
     // Neon grid: faint lines every 64px, brighter every 256px.
     ctx.lineWidth = 1;
     for (let x = 0; x <= FIELD.width; x += 64) {
@@ -96,7 +143,7 @@ export function createRenderer(canvas) {
     }
   }
 
-  function drawEnemy(e) {
+  function drawEnemy(world, e) {
     ctx.save();
     ctx.translate(e.x, e.y);
     ctx.rotate(e.angle);
@@ -147,6 +194,55 @@ export function createRenderer(canvas) {
       ctx.lineTo(-e.radius * 0.8, -e.radius * 0.8);
       ctx.closePath();
       ctx.fill();
+    } else if (e.kind === 'sniper') {
+      // The telegraph: a dashed red line down the barrel while it aims.
+      if (e.state === 'aim') {
+        ctx.strokeStyle = `rgba(255, 90, 110, ${0.45 + 0.35 * Math.sin(e.timer * 18)})`;
+        ctx.lineWidth = 2;
+        ctx.setLineDash([10, 8]);
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(460, 0);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      ctx.beginPath();
+      ctx.moveTo(e.radius * 1.5, 0);
+      ctx.lineTo(0, e.radius * 0.6);
+      ctx.lineTo(-e.radius, 0);
+      ctx.lineTo(0, -e.radius * 0.6);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#1d0533';
+      ctx.beginPath();
+      ctx.arc(0, 0, e.radius * 0.32, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (e.kind === 'kamikaze') {
+      // A spiked mine that pulses faster as it closes in.
+      const pulse = 1 + 0.18 * Math.sin(world.time * 9);
+      ctx.beginPath();
+      for (let i = 0; i < 8; i += 1) {
+        const a = (i / 8) * Math.PI * 2;
+        const r = i % 2 === 0 ? e.radius * pulse : e.radius * 0.55;
+        const px = Math.cos(a) * r;
+        const py = Math.sin(a) * r;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(0, 0, e.radius * 0.25, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (e.kind === 'orbiter') {
+      ctx.beginPath();
+      ctx.arc(0, 0, e.radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#06283d';
+      ctx.beginPath();
+      ctx.arc(e.radius * 0.35, 0, e.radius * 0.72, 0, Math.PI * 2);
+      ctx.fill();
     } else if (e.kind === 'brute') {
       ctx.beginPath();
       for (let i = 0; i < 6; i += 1) {
@@ -162,6 +258,27 @@ export function createRenderer(canvas) {
       ctx.beginPath();
       ctx.arc(0, 0, e.radius * 0.4, 0, Math.PI * 2);
       ctx.fill();
+    } else if (e.kind === 'ringboss') {
+      // A halo of rotating arcs around a dark core.
+      ctx.rotate(-e.angle);
+      const pulse = 1 + 0.05 * Math.sin(world.time * 5);
+      ctx.strokeStyle = flash ? '#ffffff' : e.color;
+      ctx.lineWidth = 7;
+      for (let i = 0; i < 3; i += 1) {
+        const a0 = e.spiral + (i * Math.PI * 2) / 3;
+        ctx.beginPath();
+        ctx.arc(0, 0, e.radius * pulse, a0, a0 + Math.PI * 0.85);
+        ctx.stroke();
+      }
+      ctx.fillStyle = flash ? '#ffffff' : e.color;
+      ctx.beginPath();
+      ctx.arc(0, 0, e.radius * 0.45, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#2b0218';
+      ctx.beginPath();
+      ctx.arc(0, 0, e.radius * 0.22, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.rotate(e.angle);
     } else if (e.kind === 'boss') {
       ctx.rotate(-e.angle);
       const pulse = 1 + 0.06 * Math.sin(e.timer * 6);
@@ -183,12 +300,23 @@ export function createRenderer(canvas) {
       ctx.fill();
     }
     ctx.restore();
+    // The Halo Warden's tell: a dashed ring on the floor grows while it winds up.
+    if (e.kind === 'ringboss' && e.state === 'windup') {
+      const progress = 1 - Math.max(0, e.timer) / 0.9;
+      ctx.strokeStyle = `rgba(255, 90, 217, ${0.5 + 0.4 * Math.sin(world.time * 14)})`;
+      ctx.lineWidth = 3;
+      ctx.setLineDash([14, 10]);
+      ctx.beginPath();
+      ctx.arc(e.x, e.y, 60 + progress * 260, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
     // Health bar over anything that is hurt.
     if (e.hp < e.maxHp && e.kind !== 'mite') {
       const w = e.radius * 2;
       ctx.fillStyle = 'rgba(0,0,0,0.55)';
       ctx.fillRect(e.x - w / 2, e.y - e.radius - 12, w, 5);
-      ctx.fillStyle = e.kind === 'boss' ? '#c26bff' : '#5cff8a';
+      ctx.fillStyle = e.kind === 'boss' ? '#c26bff' : e.kind === 'ringboss' ? '#ff5ad9' : '#5cff8a';
       ctx.fillRect(e.x - w / 2, e.y - e.radius - 12, w * Math.max(0, e.hp / e.maxHp), 5);
     }
   }
@@ -230,16 +358,50 @@ export function createRenderer(canvas) {
       const b = world.bullets[i];
       if (!b.active) continue;
       if (b.from === 'player') {
-        ctx.strokeStyle = PALETTE.bullet;
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.moveTo(b.x - b.vx * 0.016, b.y - b.vy * 0.016);
-        ctx.lineTo(b.x, b.y);
-        ctx.stroke();
-        ctx.fillStyle = '#ffffff';
-        ctx.beginPath();
-        ctx.arc(b.x, b.y, 2.5, 0, Math.PI * 2);
-        ctx.fill();
+        if (b.kind === 'missiles') {
+          // A seeking missile: a small dart with a fire trail.
+          const a = Math.atan2(b.vy, b.vx);
+          ctx.save();
+          ctx.translate(b.x, b.y);
+          ctx.rotate(a);
+          ctx.fillStyle = '#ffd94d';
+          ctx.beginPath();
+          ctx.moveTo(10, 0);
+          ctx.lineTo(-7, 5);
+          ctx.lineTo(-4, 0);
+          ctx.lineTo(-7, -5);
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+          ctx.strokeStyle = 'rgba(255, 217, 77, 0.5)';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(b.x - b.vx * 0.03, b.y - b.vy * 0.03);
+          ctx.lineTo(b.x, b.y);
+          ctx.stroke();
+        } else if (b.kind === 'railgun') {
+          // A railgun bolt: a thick white-hot line.
+          ctx.strokeStyle = '#eafcff';
+          ctx.shadowColor = '#35f2ff';
+          ctx.shadowBlur = 12;
+          ctx.lineWidth = 6;
+          ctx.beginPath();
+          ctx.moveTo(b.x - b.vx * 0.02, b.y - b.vy * 0.02);
+          ctx.lineTo(b.x, b.y);
+          ctx.stroke();
+          ctx.shadowBlur = 0;
+        } else {
+          ctx.strokeStyle = PALETTE.bullet;
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.moveTo(b.x - b.vx * 0.016, b.y - b.vy * 0.016);
+          ctx.lineTo(b.x, b.y);
+          ctx.stroke();
+          ctx.fillStyle = '#ffffff';
+          ctx.beginPath();
+          ctx.arc(b.x, b.y, 2.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
       } else {
         ctx.fillStyle = PALETTE.enemyBullet;
         ctx.shadowColor = PALETTE.enemyBullet;
@@ -299,7 +461,7 @@ export function createRenderer(canvas) {
       drawPickups(world);
       for (let i = 0; i < world.enemies.length; i += 1) {
         const e = world.enemies[i];
-        if (e.active) drawEnemy(e);
+        if (e.active) drawEnemy(world, e);
       }
       drawPlayer(world);
       drawBullets(world);
@@ -307,6 +469,16 @@ export function createRenderer(canvas) {
       drawFloaters(world);
       if (world.effects.flash > 0) {
         ctx.fillStyle = `rgba(255, 90, 110, ${world.effects.flash * 0.25})`;
+        ctx.fillRect(0, 0, FIELD.width, FIELD.height);
+      }
+      // Low hull: a red vignette that throbs with the heartbeat.
+      const p = world.player;
+      if (p.hp > 0 && p.hp < p.maxHp * 0.3) {
+        const pulse = 0.16 + 0.1 * Math.sin(world.time * 7);
+        const vig = ctx.createRadialGradient(640, 360, 220, 640, 360, 560);
+        vig.addColorStop(0, 'rgba(255, 42, 63, 0)');
+        vig.addColorStop(1, `rgba(255, 42, 63, ${pulse})`);
+        ctx.fillStyle = vig;
         ctx.fillRect(0, 0, FIELD.width, FIELD.height);
       }
     },
