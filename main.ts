@@ -1,4 +1,4 @@
-// VOIDPULSE — Neon Arena: a best-game-01 entry (Node 22, standard library only).
+// VOIDPULSE v2 — Neon Arena: a best-game-01 entry (Node 22, standard library only).
 // The game is this directory's game/ folder: plain static files a desktop
 // browser loads offline (game/index.html and its ES modules, no library and no
 // network request), and this program hands it in. It copies game/ and
@@ -7,9 +7,11 @@
 //
 // The game: a top-down 2D arena roguelite shooter. WASD moves, the mouse aims,
 // hold-click fires, Space dashes through danger, and after every cleared wave
-// the player drafts one of three upgrades. Waves scale, a boss — the
-// Voidwarden — arrives every fifth wave, and the score is the goal: survive,
-// stack upgrades, and see how far the run goes.
+// the player drafts one of three upgrades from a 21-card pool. Waves scale,
+// the Voidwarden arrives every fifth wave and the Halo Warden every tenth,
+// and the score is the goal: survive, stack upgrades, and see how far the run goes.
+// v2 adds three new enemies, a second boss, three unlockable weapons, six new
+// upgrade cards, a combo multiplier, hit-stop, and a starfield-nebula arena.
 //
 // Serve it locally with `node serve.ts`, then open http://localhost:8080.
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
