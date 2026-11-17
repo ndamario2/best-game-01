@@ -42,15 +42,37 @@ export const ENEMY = {
   mite: { radius: 9, hp: 8, speed: 235, damage: 6, score: 20, cost: 0, color: '#8dff6a' },
   charger: { radius: 18, hp: 46, speed: 130, damage: 16, score: 110, cost: 2, color: '#ffe14d' },
   brute: { radius: 30, hp: 130, speed: 62, damage: 20, score: 200, cost: 4, color: '#ff5a4d' },
+  sniper: { radius: 15, hp: 24, speed: 95, damage: 14, score: 120, cost: 3, color: '#b388ff' },
+  kamikaze: { radius: 14, hp: 16, speed: 215, damage: 18, score: 90, cost: 2, color: '#ff2e63' },
+  orbiter: { radius: 15, hp: 28, speed: 140, damage: 9, score: 100, cost: 2, color: '#4dd7ff' },
   boss: { radius: 52, hp: 950, speed: 58, damage: 24, score: 1500, cost: 0, color: '#c26bff' },
+  ringboss: { radius: 58, hp: 1150, speed: 46, damage: 22, score: 2500, cost: 0, color: '#ff5ad9' },
 };
 
 /** Wave N spawns this many points of enemies; a boss wave spawns the boss plus adds. */
 export function waveBudget(wave) {
-  return 6 + wave * 4;
+  // Gentle onboarding: the first three waves are small, then the budget grows.
+  if (wave <= 3) return 4 + wave * 2;
+  return 10 + (wave - 3) * 4;
+}
+
+/** Seconds between spawns while a wave trickles in; the opening waves breathe. */
+export function spawnInterval(wave) {
+  return wave <= 3 ? 1.15 : 0.85;
 }
 
 export const BOSS_EVERY = 5;
+
+/** Every tenth wave the Halo Warden replaces the Voidwarden. */
+export const RING_BOSS_EVERY = 10;
+
+/** Weapon tuning, per weapon: the blaster is the starter; the draft unlocks the rest. */
+export const WEAPON = {
+  blaster: { name: 'Pulse Blaster', interval: 0.15, damage: 12, speed: 720 },
+  shotgun: { name: 'Scattergun', pellets: 5, spread: 0.55, damage: 9, interval: 0.55, speed: 640, life: 0.5, heat: 10 },
+  railgun: { name: 'Railgun', damage: 70, interval: 0.95, speed: 1400, pierce: 99, radius: 9, life: 1.2, heat: 22 },
+  missiles: { name: 'Seeker Missiles', count: 2, damage: 16, interval: 0.5, speed: 520, turn: 6.0, heat: 6 },
+};
 
 /** Kill streak: kills inside this window keep the streak alive. */
 export const STREAK_WINDOW = 2.5;

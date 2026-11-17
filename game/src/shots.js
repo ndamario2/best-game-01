@@ -10,7 +10,7 @@ import { SCREEN_OVER, SCREEN_PLAY, SCREEN_TITLE } from './hud.js';
 
 const START_SECONDS = 6;
 const PLAY_SECONDS = 24;
-const BOSS_SECONDS = 10;
+const BOSS_SECONDS = 14;
 const END_LIMIT_SECONDS = 300;
 
 /** An autopilot that plays like a careful human: `skill` 0 plays dead, 1 plays well. */
@@ -123,7 +123,8 @@ function simulate(world, input, seconds) {
 export function stageShot(name, world) {
   resetWorld(world);
   if (name === 'boss') {
-    startWave(world, 5);
+    // Wave 10: the Halo Warden, the new second boss, mid-fight.
+    startWave(world, 10);
     const pilot = createAutopilot(world, 1);
     simulate(world, pilot, BOSS_SECONDS);
     return { screen: SCREEN_PLAY, best: world.score };

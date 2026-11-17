@@ -3,8 +3,8 @@
 // pause and game-over screens. Everything here draws in field coordinates
 // after the renderer has set the transform.
 
-import { FIELD, PALETTE, FONT, BOSS_EVERY } from './config.js';
-import { upgradeLevel, UPGRADE_MAX_LEVEL } from './upgrades.js';
+import { FIELD, PALETTE, FONT } from './config.js';
+import { upgradeLevel, UPGRADE_MAX_LEVEL, WEAPON_CARD_IDS } from './upgrades.js';
 import { enemiesAlive } from './world.js';
 
 export const SCREEN_TITLE = 'title';
@@ -45,12 +45,19 @@ export function drawHud(ctx, world, best) {
   ctx.fillText(`${Math.ceil(player.hp)} / ${player.maxHp}`, 252, 50);
   ctx.fillStyle = PALETTE.muted;
   ctx.font = `bold 13px ${FONT}`;
-  ctx.fillText(player.dashCooldown <= 0 ? 'DASH READY  [SPACE]' : `DASH ${player.dashCooldown.toFixed(1)}s`, 24, 76);
+  const maxDash = 1 + upgradeLevel(player, 'dashcharges');
+  ctx.fillText(player.dashCharges > 0 ? `DASH x${player.dashCharges}/${maxDash}  [SPACE]` : `DASH ${player.dashRefill.toFixed(1)}s`, 24, 76);
+  // Current weapon, bottom-left above the heat bar.
+  ctx.fillStyle = PALETTE.muted;
+  ctx.font = `bold 12px ${FONT}`;
+  const weaponName = { blaster: 'PULSE BLASTER', shotgun: 'SCATTERGUN', railgun: 'RAILGUN', missiles: 'SEEKER MISSILES' }[player.weapon] || 'PULSE BLASTER';
+  const weaponLv = player.weapon === 'blaster' ? '' : `  LV ${upgradeLevel(player, player.weapon)}`;
+  ctx.fillText(`WEAPON ${weaponName}${weaponLv}`, 24, FIELD.height - 58);
   // Top-centre: wave and enemies left.
   ctx.textAlign = 'center';
   ctx.font = `bold 20px ${FONT}`;
   ctx.fillStyle = PALETTE.text;
-  ctx.fillText(world.wave % BOSS_EVERY === 0 && world.boss ? `WAVE ${world.wave} — THE VOIDWARDEN` : `WAVE ${world.wave}`, FIELD.width / 2, 30);
+  ctx.fillText(world.bossName ? `WAVE ${world.wave} — ${world.bossName}` : `WAVE ${world.wave}`, FIELD.width / 2, 30);
   ctx.font = `bold 13px ${FONT}`;
   ctx.fillStyle = PALETTE.muted;
   const left = world.queue.length + enemiesAlive(world);
@@ -77,12 +84,23 @@ export function drawHud(ctx, world, best) {
   ctx.font = `bold 12px ${FONT}`;
   ctx.fillText(player.overheated ? 'OVERHEATED — COOLING' : 'HEAT', heatX, FIELD.height - 34);
   bar(ctx, heatX, FIELD.height - 26, 260, 8, player.heat / 100, player.overheated ? PALETTE.danger : '#35f2ff', '#1a2342');
-  // Kill streak.
-  if (world.streak >= 5) {
+  // Kill streak: the combo counter, with the score multiplier it earns.
+  if (world.streak >= 2) {
     ctx.textAlign = 'center';
     ctx.font = `bold 24px ${FONT}`;
     ctx.fillStyle = '#ff9f2e';
-    ctx.fillText(`STREAK x${world.streak}`, FIELD.width / 2, 108);
+    const mult = 1 + 0.05 * Math.min(world.streak, 20);
+    ctx.fillText(`COMBO x${world.streak}  ·  +${Math.round((mult - 1) * 100)}% SCORE`, FIELD.width / 2, 108);
+    ctx.font = `bold 12px ${FONT}`;
+    ctx.fillStyle = PALETTE.muted;
+    ctx.fillText(`streak ends in ${Math.max(0, world.streakTimer).toFixed(1)}s — keep killing`, FIELD.width / 2, 130);
+  }
+  // Controls hint on the first wave, until the player has found their feet.
+  if (world.wave === 1 && world.time < 10) {
+    ctx.textAlign = 'center';
+    ctx.font = `bold 15px ${FONT}`;
+    ctx.fillStyle = 'rgba(238, 243, 255, 0.75)';
+    ctx.fillText('WASD move · mouse aim · hold click fire · SPACE dash through danger', FIELD.width / 2, FIELD.height - 58);
   }
 }
 
@@ -93,10 +111,25 @@ export function drawWaveBanner(ctx, world) {
   ctx.textBaseline = 'middle';
   ctx.font = `bold 52px ${FONT}`;
   ctx.fillStyle = 'rgba(238, 243, 255, 0.95)';
-  ctx.fillText(world.wave % BOSS_EVERY === 0 ? `WAVE ${world.wave}` : `WAVE ${world.wave}`, FIELD.width / 2, FIELD.height / 2 - 60);
+  ctx.fillText(`WAVE ${world.wave}`, FIELD.width / 2, FIELD.height / 2 - 60);
   ctx.font = `bold 22px ${FONT}`;
-  ctx.fillStyle = world.wave % BOSS_EVERY === 0 ? '#c26bff' : PALETTE.muted;
-  ctx.fillText(world.wave % BOSS_EVERY === 0 ? 'THE VOIDWARDEN APPROACHES' : 'CLEAR THE ARENA', FIELD.width / 2, FIELD.height / 2 - 14);
+  if (world.bossName) {
+    // Boss intro card: the name, and what makes this one dangerous.
+    ctx.fillStyle = world.bossName === 'THE HALO WARDEN' ? '#ff5ad9' : '#c26bff';
+    ctx.fillText(world.bossName, FIELD.width / 2, FIELD.height / 2 - 14);
+    ctx.font = `18px ${FONT}`;
+    ctx.fillStyle = PALETTE.muted;
+    ctx.fillText(
+      world.bossName === 'THE HALO WARDEN'
+        ? 'Bullet-hell rings — watch the dashed circle, then move'
+        : 'Radial bursts, aimed spreads, summons — keep moving',
+      FIELD.width / 2,
+      FIELD.height / 2 + 20,
+    );
+  } else {
+    ctx.fillStyle = PALETTE.muted;
+    ctx.fillText('CLEAR THE ARENA', FIELD.width / 2, FIELD.height / 2 - 14);
+  }
 }
 
 /** The title screen: name, goal, controls, best score, and how to start. */
@@ -116,8 +149,8 @@ export function drawTitle(ctx, world, best) {
   ctx.fillText('— NEON ARENA —', FIELD.width / 2, 248);
   ctx.font = `20px ${FONT}`;
   ctx.fillStyle = PALETTE.text;
-  ctx.fillText('Survive the waves. Break the Warden every 5 waves.', FIELD.width / 2, 300);
-  ctx.fillText('Pick an upgrade after each wave. How long can you last?', FIELD.width / 2, 330);
+  ctx.fillText('Survive the waves. Break the Voidwarden every 5 waves — and the Halo Warden every 10.', FIELD.width / 2, 300);
+  ctx.fillText('Pick an upgrade after each wave. Unlock the Scattergun, Railgun or Seeker Missiles in the draft.', FIELD.width / 2, 330);
   ctx.font = `bold 17px ${FONT}`;
   ctx.fillStyle = PALETTE.muted;
   ctx.fillText('WASD move   ·   Mouse aim   ·   Hold click fire   ·   SPACE dash   ·   P pause', FIELD.width / 2, 400);
@@ -168,6 +201,14 @@ export function drawUpgrade(ctx, world) {
     const x = rect.x;
     const y = rect.y;
     panel(ctx, x, y, cardW, cardH);
+    // Weapon cards get a gold frame: they change how the run plays.
+    if (WEAPON_CARD_IDS.includes(u.id)) {
+      ctx.strokeStyle = PALETTE.gold;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.roundRect(x + 2, y + 2, cardW - 4, cardH - 4, 8);
+      ctx.stroke();
+    }
     ctx.fillStyle = PALETTE.gold;
     ctx.font = `bold 15px ${FONT}`;
     ctx.fillText(`[${i + 1}]`, x + cardW / 2, y + 28);
@@ -194,18 +235,27 @@ export function drawUpgrade(ctx, world) {
   ctx.fillText(owned.length === 0 ? 'No upgrades yet.' : `Your build: ${owned.map(([k, v]) => `${k} ${v}`).join('  ·  ')}`, FIELD.width / 2, 520);
 }
 
-/** The pause screen. */
-export function drawPaused(ctx) {
+/** The pause screen: the run so far, the build, and the controls. */
+export function drawPaused(ctx, world) {
   ctx.fillStyle = 'rgba(7, 10, 24, 0.66)';
   ctx.fillRect(0, 0, FIELD.width, FIELD.height);
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.font = `bold 56px ${FONT}`;
   ctx.fillStyle = PALETTE.text;
-  ctx.fillText('PAUSED', FIELD.width / 2, FIELD.height / 2 - 30);
+  ctx.fillText('PAUSED', FIELD.width / 2, FIELD.height / 2 - 120);
   ctx.font = `20px ${FONT}`;
+  ctx.fillStyle = PALETTE.text;
+  const mins = Math.floor(world.time / 60);
+  const secs = Math.floor(world.time % 60);
+  ctx.fillText(`Wave ${world.wave}  ·  Score ${world.score}  ·  Kills ${world.kills}  ·  ${mins}:${String(secs).padStart(2, '0')}`, FIELD.width / 2, FIELD.height / 2 - 58);
+  const owned = Object.entries(world.player.upgrades).filter(([, v]) => v > 0);
+  ctx.font = `16px ${FONT}`;
   ctx.fillStyle = PALETTE.muted;
-  ctx.fillText('Press P or Escape to resume', FIELD.width / 2, FIELD.height / 2 + 24);
+  ctx.fillText(owned.length === 0 ? 'No upgrades yet.' : `Your build: ${owned.map(([k, v]) => `${k} ${v}`).join('  ·  ')}`, FIELD.width / 2, FIELD.height / 2 - 22);
+  ctx.font = `18px ${FONT}`;
+  ctx.fillText('WASD move  ·  Mouse aim  ·  Hold click fire  ·  SPACE dash  ·  1 / 2 / 3 pick a card', FIELD.width / 2, FIELD.height / 2 + 24);
+  ctx.fillText('Press P or Escape to resume', FIELD.width / 2, FIELD.height / 2 + 58);
 }
 
 /** The game-over screen: stats, best score, and the restart prompt. */
@@ -227,14 +277,19 @@ export function drawOver(ctx, world, best) {
   ctx.fillStyle = best > 0 && world.score >= best ? PALETTE.gold : PALETTE.muted;
   ctx.fillText(best > 0 && world.score >= best ? '★ NEW BEST SCORE ★' : `BEST ${best}`, FIELD.width / 2, 282);
   const accuracy = world.shotsFired > 0 ? Math.round((world.shotsHit / world.shotsFired) * 100) : 0;
+  const mins = Math.floor(world.time / 60);
+  const secs = Math.floor(world.time % 60);
+  const weaponName = { blaster: 'Pulse Blaster', shotgun: 'Scattergun', railgun: 'Railgun', missiles: 'Seeker Missiles' }[world.player.weapon] || 'Pulse Blaster';
   ctx.fillStyle = PALETTE.text;
   ctx.font = `19px ${FONT}`;
   const stats = [
     `Waves cleared: ${Math.max(0, world.wave - 1)}`,
     `Kills: ${world.kills}`,
-    `Best streak: x${world.bestStreak}`,
+    `Best combo: x${world.bestStreak}`,
     `Damage dealt: ${Math.round(world.damageDealt)}`,
     `Accuracy: ${accuracy}%`,
+    `Time survived: ${mins}:${String(secs).padStart(2, '0')}`,
+    `Weapon: ${weaponName}`,
   ];
   for (let i = 0; i < stats.length; i += 1) {
     ctx.fillText(stats[i], FIELD.width / 2, 330 + i * 30);

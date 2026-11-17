@@ -32,7 +32,7 @@ const world = createWorld(seed, audio);
 const renderer = createRenderer(canvas);
 
 /** Debug hook for playtests: the live screen, score, HP, wave and kills. */
-window.__voidpulse = { screen: SCREEN_TITLE, score: 0, hp: 100, wave: 0, kills: 0, credits: 0, phase: 'intro', enemies: 0, px: 640, py: 360, heat: 0, dash: 0, damage: 0, shotsFired: 0, shotsHit: 0, upgrades: {}, choices: [], nearest: null };
+window.__voidpulse = { screen: SCREEN_TITLE, score: 0, hp: 100, wave: 0, kills: 0, credits: 0, phase: 'intro', enemies: 0, px: 640, py: 360, heat: 0, dash: 0, damage: 0, shotsFired: 0, shotsHit: 0, upgrades: {}, choices: [], nearest: null, weapon: 'blaster', combo: 0, boss: null };
 
 function readBest() {
   try {
@@ -53,6 +53,18 @@ function saveBest(value) {
 function runShot(name) {
   world.view = renderer.view();
   const scene = stageShot(name, world);
+  // Debug hook for shot verification: what the staged scene holds.
+  window.__shotState = {
+    screen: scene.screen,
+    boss: world.boss ? world.boss.kind : null,
+    bossName: world.bossName,
+    bossHp: world.boss ? Math.round(world.boss.hp) : 0,
+    enemies: world.enemies.filter((e) => e.active).length,
+    score: world.score,
+    kills: world.kills,
+    wave: world.wave,
+    weapon: world.player.weapon,
+  };
   let painted = 0;
   function paint() {
     renderer.draw(world);
@@ -103,6 +115,9 @@ function runGame() {
     window.__voidpulse.shotsHit = world.shotsHit;
     window.__voidpulse.upgrades = { ...world.player.upgrades };
     window.__voidpulse.choices = world.upgradeChoices.map((u) => u.id);
+    window.__voidpulse.weapon = world.player.weapon;
+    window.__voidpulse.combo = world.streak;
+    window.__voidpulse.boss = world.bossName;
     let nearest = null;
     let nearestDist = Infinity;
     for (let i = 0; i < world.enemies.length; i += 1) {
@@ -222,7 +237,7 @@ function runGame() {
     const ctx = renderer.context();
     if (screen === SCREEN_TITLE) drawTitle(ctx, world, best);
     else if (screen === SCREEN_UPGRADE) drawUpgrade(ctx, world);
-    else if (screen === SCREEN_PAUSED) drawPaused(ctx);
+    else if (screen === SCREEN_PAUSED) drawPaused(ctx, world);
     else if (screen === SCREEN_OVER) drawOver(ctx, world, best);
     else {
       drawHud(ctx, world, best);
